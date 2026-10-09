@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>订单簿回放 · 模拟下单原型</title>
+<style>
+  :root{--bg:#0f1319;--panel:#171c24;--line:#252c37;--fg:#dfe6f0;--dim:#8b98ab;
+        --up:#e5484d;--down:#30a46c;--buy:#e5484d;--sell:#30a46c;--accent:#4c8dff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:13px/1.5 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  header{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 14px;
+         background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  h1{font-size:14px;margin:0 12px 0 0;font-weight:600;letter-spacing:.5px}
+  select,input,button{background:#0c1015;color:var(--fg);border:1px solid var(--line);
+       border-radius:6px;padding:5px 8px;font:inherit}
+  button{cursor:pointer;background:#1d2530}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.buy{background:var(--buy);border-color:var(--buy);color:#fff}
+  button.sell{background:var(--sell);border-color:var(--sell);color:#fff}
+  .wrap{display:grid;grid-template-columns:340px 1fr 1fr;gap:12px;padding:12px;align-items:start}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .panel h2{font-size:12px;margin:0 0 8px;color:var(--dim);font-weight:600;letter-spacing:.6px}
+  .row{display:flex;justify-content:space-between;gap:8px;padding:2px 0}
+  .dim{color:var(--dim)}
+  .num{font-variant-numeric:tabular-nums}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th,td{text-align:right;padding:3px 6px;border-bottom:1px solid var(--line);font-size:12px}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--dim);font-weight:500;position:sticky;top:0;background:var(--panel)}
+  .ladder td{position:relative}
+  .bar{position:absolute;right:0;top:0;bottom:0;opacity:.16;border-radius:2px}
+  .ask .bar{background:var(--sell)} .bid .bar{background:var(--buy)}
+  .ask{color:var(--sell)} .bid{color:var(--buy)}
+  .mid{display:flex;justify-content:space-between;padding:6px 6px;border-top:1px solid var(--line);
+       border-bottom:1px solid var(--line);margin:4px 0}
+  .big{font-size:18px;font-weight:600}
+  .scroll{max-height:260px;overflow:auto}
+  .tag{display:inline-block;padding:1px 6px;border-radius:999px;font-size:11px;border:1px solid var(--line)}
+  .ok{color:var(--down)} .err{color:var(--up)}
+  form.stack{display:grid;gap:6px}
+  form.stack label{display:grid;grid-template-columns:52px 1fr;align-items:center;gap:6px;color:var(--dim)}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+  .note{color:var(--dim);font-size:11px;margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>订单簿回放 · 模拟下单</h1>
+  <label class="dim">标的 <select id="sym"></select></label>
+  <label class="dim">行情时间 <input id="t" size="12" value="09:30:00.000"></label>
+  <label class="dim">步长
+    <select id="step">
+      <option value="1000">1 秒</option>
+      <option value="10000">10 秒</option>
+      <option value="60000" selected>1 分</option>
+      <option value="300000">5 分</option>
+    </select>
+  </label>
+  <button id="back">◀ 后退</button>
+  <button id="fwd">前进 ▶</button>
+  <button id="play" class="primary">▶ 播放</button>
+  <button id="reset">重置账户</button>
+  <span id="status" class="dim"></span>
+</header>
+
+<div class="wrap">
+  <!-- 盘口 -->
+  <section class="panel">
+    <h2>市场十档（由逐笔委托回放生成）</h2>
+    <table class="ladder" id="ladder"></table>
+    <div class="mid">
+      <span class="dim">最新</span><span class="big num" id="last">–</span>
+      <span class="dim">累计量</span><span class="num" id="cum">–</span>
+    </div>
+    <div class="row"><span class="dim">昨收</span><span class="num" id="pc">–</span></div>
+    <div class="row"><span class="dim">涨跌幅</span><span class="num" id="chg">–</span></div>
+    <div class="row"><span class="dim">规则</span><span id="rule">–</span></div>
+    <div class="note">时间 <span id="clock">–</span> · 成交笔数 <span id="ntr">–</span></div>
+  </section>
+
+  <!-- 下单 + 账户 -->
+  <section class="panel">
+    <h2>模拟下单</h2>
+    <form class="stack" id="form">
+      <label>价格 <input id="price" type="number" step="0.01" required></label>
+      <label>数量 <input id="qty" type="number" step="1" value="100" required></label>
+      <div class="btns">
+        <button type="button" class="buy" id="dobuy">买入</button>
+        <button type="button" class="sell" id="dosell">卖出</button>
+      </div>
+    </form>
+    <div id="msg" class="note"></div>
+    <h2 style="margin-top:12px">模拟账户</h2>
+    <div class="row"><span class="dim">可用资金</span><span class="num" id="cash">–</span></div>
+    <div class="row"><span class="dim">冻结资金</span><span class="num" id="fcash">–</span></div>
+    <div class="row"><span class="dim">持仓市值</span><span class="num" id="mv">–</span></div>
+    <div class="row"><span class="dim">总资产</span><span class="num" id="ta">–</span></div>
+    <div class="row"><span class="dim">累计费用</span><span class="num" id="fee">–</span></div>
+    <div class="scroll"><table id="pos"></table></div>
+    <button id="settle" style="margin-top:6px">日终结算（T+1 转可卖）</button>
+  </section>
+
+  <!-- 委托 / 成交 -->
+  <section class="panel">
+    <h2>委托记录</h2>
+    <div class="scroll"><table id="orders"></table></div>
+    <h2 style="margin-top:12px">模拟成交记录</h2>
+    <div class="scroll"><table id="fills"></table></div>
+  </section>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => (n===null||n===undefined||isNaN(n)) ? '–' : Number(n).toLocaleString('zh-CN');
+const px  = n => (n===null||n===undefined) ? '–' : Number(n).toFixed(2);
+
+function t2str(t){                       // 100000000 -> 10:00:00.000
+  if(t===null||t===undefined) return '–';
+  const s=String(t).padStart(9,'0');
+  return `${s.slice(0,2)}:${s.slice(2,4)}:${s.slice(4,6)}.${s.slice(6,9)}`;
+}
+function str2t(s){                       // 10:00:00.000 -> 100000000
+  const m=String(s).trim().match(/^(\d{1,2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/);
+  if(!m) return null;
+  const ms=(m[4]||'0').padEnd(3,'0');
+  return parseInt(m[1])*10000000+parseInt(m[2])*100000+parseInt(m[3])*1000+parseInt(ms);
+}
+async function api(path, body){
+  const opt = body ? {method:'POST',headers:{'Content-Type':'application/json'},
+                      body:JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  return await r.json();
+}
+
+let playing=null, symbol=null;
+
+function render(st){
+  if(!st || !st.ready){ $('status').textContent = st && st.error ? st.error : '请选择标的'; return; }
+  const m = st.market, asks = m.asks, bids = m.bids;
+  const maxv = Math.max(1, ...asks.map(a=>a.volume), ...bids.map(b=>b.volume));
+  let rows = '';
+  asks.forEach((a,i)=>{ rows += `<tr class="ask"><td>卖${asks.length-i}</td>
+    <td>${px(a.price)}</td><td>${fmt(a.volume)}<span class="bar" style="width:${a.volume/maxv*100}%"></span></td></tr>`; });
+  rows += `<tr><td colspan="3" style="border:none;height:4px"></td></tr>`;
+  bids.forEach((b,i)=>{ rows += `<tr class="bid"><td>买${i+1}</td>
+    <td>${px(b.price)}</td><td>${fmt(b.volume)}<span class="bar" style="width:${b.volume/maxv*100}%"></span></td></tr>`; });
+  $('ladder').innerHTML = `<thead><tr><th>档位</th><th>价格</th><th>数量(股)</th></tr></thead><tbody>${rows}</tbody>`;
+
+  $('last').textContent = px(m.last);
+  $('cum').textContent  = fmt(m.cum_volume);
+  $('ntr').textContent  = fmt(m.n_trades);
+  $('clock').textContent= t2str(st.time);
+  $('pc').textContent   = px(st.prev_close);
+  if(m.last && st.prev_close){
+    const chg=(m.last/st.prev_close-1)*100;
+    $('chg').innerHTML = `<span class="${chg>=0?'err':'ok'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
+  }
+  $('rule').innerHTML = st.symbol ? `<span class="tag">${String(st.symbol).startsWith('688')?'科创板':'主板'}</span>` : '–';
+
+  const a = st.account;
+  $('cash').textContent = fmt(a.cash); $('fcash').textContent = fmt(a.frozen_cash);
+  $('mv').textContent = fmt(a.market_value); $('ta').textContent = fmt(a.total_asset);
+  $('fee').textContent = fmt(a.total_fee);
+  $('pos').innerHTML = `<thead><tr><th>代码</th><th>总量</th><th>可卖</th><th>冻结</th><th>今仓</th></tr></thead><tbody>`+
+    (a.holdings.length? a.holdings.map(h=>`<tr><td>${h.symbol}</td><td>${fmt(h.total)}</td>
+      <td>${fmt(h.sellable)}</td><td>${fmt(h.frozen)}</td><td>${fmt(h.today)}</td></tr>`).join('')
+      : `<tr><td colspan="5" class="dim">无持仓</td></tr>`)+`</tbody>`;
+
+  $('orders').innerHTML = `<thead><tr><th>时间</th><th>方向</th><th>价格</th><th>数量</th>
+      <th>已成</th><th>状态</th><th></th></tr></thead><tbody>`+
+    (st.orders.length? st.orders.map(o=>`<tr><td>${t2str(o.ts)}</td>
+      <td class="${o.side==='buy'?'bid':'ask'}">${o.side==='buy'?'买':'卖'}</td>
+      <td>${px(o.price)}</td><td>${fmt(o.qty)}</td><td>${fmt(o.filled)}</td>
+      <td title="${o.reason||''}">${o.status}</td>
+      <td>${o.remaining>0?`<button onclick="cancelOrder(${o.oid})" style="padding:1px 6px">撤</button>`:''}</td>
+      </tr>`).join('') : `<tr><td colspan="7" class="dim">暂无委托</td></tr>`)+`</tbody>`;
+
+  $('fills').innerHTML = `<thead><tr><th>时间</th><th>方向</th><th>成交价</th><th>数量</th>
+      <th>费用</th><th>来源</th></tr></thead><tbody>`+
+    (st.fills.length? st.fills.map(f=>`<tr><td>${t2str(f.ts)}</td>
+      <td class="${f.side==='buy'?'bid':'ask'}">${f.side==='buy'?'买':'卖'}</td>
+      <td>${px(f.price)}</td><td>${fmt(f.volume)}</td><td>${px(f.fee)}</td>
+      <td>${f.passive?'被动':'主动'}</td></tr>`).join('') : `<tr><td colspan="6" class="dim">暂无成交</td></tr>`)+`</tbody>`;
+
+  if(m.bids.length) $('price').value = px(m.bids[0].price);
+}
+
+async function selectSymbol(sym, time){
+  symbol = sym;
+  $('status').textContent = '回放中…';
+  const st = await api('/api/select', {symbol:sym, time:time});
+  $('status').textContent = st.error ? st.error : '';
+  render(st);
+}
+
+async function seek(time){
+  if(time===null) return;
+  const st = await api('/api/seek', {time:time});
+  render(st);
+}
+
+function currentTime(){ return str2t($('t').value); }
+
+async function place(side){
+  const price = parseFloat($('price').value), qty = parseInt($('qty').value);
+  const st = await api('/api/order', {side:side, price:price, qty:qty});
+  if(st.error){ $('msg').innerHTML = `<span class="err">${st.error}</span>`; return; }
+  const r = st.result;
+  $('msg').innerHTML = r.status==='已拒绝'
+      ? `<span class="err">已拒绝：${r.reason}</span>`
+      : `<span class="ok">${r.status}</span> 价位 ${px(r.price)} 数量 ${r.qty}（成交 ${r.filled}）`;
+  $('t').value = t2str(st.time);
+  render(st);
+}
+async function cancelOrder(oid){
+  const st = await api('/api/cancel', {oid:oid});
+  render(st);
+}
+async function step(dir){
+  const cur = currentTime(); if(cur===null) return;
+  const next = cur + dir*parseInt($('step').value);
+  $('t').value = t2str(next);
+  await seek(next);
+}
+
+(async function init(){
+  const info = await api('/api/symbols');
+  if(info.error){ $('status').textContent = info.error; return; }
+  $('sym').innerHTML = info.symbols.map(s=>`<option value="${s}">${s}</option>`).join('');
+  $('status').textContent = `${info.count} 只标的 · ${info.data_dir}`;
+  $('sym').onchange = e => selectSymbol(parseInt(e.target.value), 93000000);
+  $('fwd').onclick = ()=>step(1);
+  $('back').onclick = ()=>step(-1);
+  $('t').onchange = ()=>seek(currentTime());
+  $('dobuy').onclick = ()=>place('buy');
+  $('dosell').onclick = ()=>place('sell');
+  $('reset').onclick = ()=>selectSymbol(symbol, currentTime()||93000000);
+  $('settle').onclick = async ()=>{ render(await api('/api/settle', {})); };
+  $('play').onclick = ()=>{
+    if(playing){ clearInterval(playing); playing=null; $('play').textContent='▶ 播放'; }
+    else { $('play').textContent='⏸ 暂停';
+      playing = setInterval(async ()=>{
+        const cur=currentTime(); if(cur===null) return;
+        const next=cur+parseInt($('step').value);
+        $('t').value=t2str(next); await seek(next);
+      }, 400); }
+  };
+  await selectSymbol(info.symbols[0], 93000000);
+})();
+</script>
+</body>
+</html>
+

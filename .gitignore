@@ -1,0 +1,30 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- 原始行情数据（从课程 Release 下载，仓库不重复包含）----
+sse50_*/
+cache/
+*.parquet
+
+# ---- 可再生的中间产物 ----
+market_data.js
+snap_panel.parquet
+vpin.parquet
+
+# ---- 浏览器自动化 / 截图残留 ----
+_chrome_tmp/
+_sc/
+_dom.html
+_shot*.png
+_crop_*.png
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
